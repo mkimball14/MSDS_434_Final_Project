@@ -135,4 +135,54 @@ dmypy.json
 cython_debug/
 
 # Ignore crypto sentiment requirements file
-@crypto-sentiment-requirements.md 
+@crypto-sentiment-requirements.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Generated files
+app/models/*.png
+app/models/*.pkl
+app/models/*.json
+app/models/*.onnx
+
+# Logs
+*.log
+
+# Local development
+.env
+.env.local
+.env.*.local
+
+# Docker
+.docker/ 
