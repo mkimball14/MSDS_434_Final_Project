@@ -55,32 +55,79 @@ def train_forecast_model():
     s3_bucket = "crypto-sentiment-bucket2"
     s3_file_key = "sentiment.json"
     
+    print("\nAttempting to load data from S3...")
+    print(f"Bucket: {s3_bucket}")
+    print(f"Key: {s3_file_key}")
+    
     s3 = boto3.client("s3")
     obj = s3.get_object(Bucket=s3_bucket, Key=s3_file_key)
     data = obj["Body"].read().decode("utf-8")
+    
+    # Print first few records of raw data
+    print("\nFirst few records of raw data:")
+    raw_data = json.loads(data)
+    for i, record in enumerate(raw_data[:2]):
+        print(f"\nRecord {i + 1}:")
+        print(json.dumps(record, indent=2))
     
     # Parse JSON data
     sentiment_data = json.loads(data)
     df = pd.DataFrame(sentiment_data)
     
-    print(f"Loaded {len(df)} records from S3")
+    print(f"\nLoaded {len(df)} records from S3")
+    print("\nDataFrame columns:", df.columns.tolist())
+    print("\nFirst few dates before parsing:")
+    print(df["date"].head())
     
-    # Convert date strings to datetime objects
-    df["timestamp"] = pd.to_datetime(df["date"], format="%m.%d.%Y %H:%M:%S")
+    # Convert date strings to datetime objects - handle multiple possible formats
+    def parse_date(date_str):
+        try:
+            # Try multiple date formats
+            for fmt in ["%Y-%m-%d %H:%M:%S", "%m.%d.%Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]:
+                try:
+                    dt = pd.to_datetime(date_str, format=fmt)
+                    print(f"Successfully parsed date {date_str} with format {fmt}")
+                    return dt
+                except:
+                    continue
+            # If none of the specific formats work, try the default parser
+            print(f"Trying default parser for date: {date_str}")
+            return pd.to_datetime(date_str)
+        except Exception as e:
+            print(f"Warning: Could not parse date: {date_str}, Error: {str(e)}")
+            return None
+
+    print("\nParsing dates...")
+    df["timestamp"] = df["date"].apply(parse_date)
+    
+    # Remove invalid dates
+    df = df.dropna(subset=["timestamp"])
+    print(f"\nRemaining records after removing invalid dates: {len(df)}")
+    
+    # Print data summary
+    latest_date = df["timestamp"].max()
+    earliest_date = df["timestamp"].min()
+    
+    print(f"\nData summary:")
+    print(f"Earliest date: {earliest_date}")
+    print(f"Latest date: {latest_date}")
+    print(f"Date range: {(latest_date - earliest_date).days} days")
+    print("\nSample of parsed dates:")
+    print(df[["date", "timestamp"]].head())
+    
+    # Ensure timestamps are in chronological order
+    df = df.sort_values("timestamp")
     
     # Create numeric sentiment values
-    # We'll use the actual sentiment scores instead of just labels
     df["sentiment_score_positive"] = df["sentiment_score_positive"].astype(float)
     df["sentiment_score_negative"] = df["sentiment_score_negative"].astype(float)
     df["sentiment_score_neutral"] = df["sentiment_score_neutral"].astype(float)
     df["sentiment_score_mixed"] = df["sentiment_score_mixed"].astype(float)
     
     # Calculate a compound sentiment score (-1 to 1 scale)
-    # Higher value = more positive, lower value = more negative
     df["compound_score"] = df["sentiment_score_positive"] - df["sentiment_score_negative"]
     
     # Aggregate sentiment by day
-    # Group by day and calculate average sentiment
     daily_sentiment = df.groupby(pd.Grouper(key="timestamp", freq="D")).agg({
         "compound_score": "mean",
         "sentiment_score_positive": "mean",
@@ -90,44 +137,43 @@ def train_forecast_model():
         "id": "count"  # Count messages per day
     })
     
+    # Remove days with no data
+    daily_sentiment = daily_sentiment[daily_sentiment["id"] > 0]
+    
     # Rename count column
     daily_sentiment.rename(columns={"id": "message_count"}, inplace=True)
+    
+    print(f"\nProcessed data summary:")
+    print(f"Date range: {daily_sentiment.index.min()} to {daily_sentiment.index.max()}")
+    print(f"Number of days with data: {len(daily_sentiment)}")
     
     # After creating daily_sentiment and before removing NaNs
     if len(daily_sentiment.dropna()) < 14:
         print("Dataset too sparse, attempting augmentation")
-        daily_sentiment = augment_sparse_data(daily_sentiment)
+        daily_sentiment = augment_sparse_data(daily_sentiment, min_days=30)  # Increase minimum days
     else:
         # Only remove NaNs if we have enough data
         daily_sentiment = daily_sentiment.dropna()
     
     print(f"Created time series with {len(daily_sentiment)} days of data")
     
-    # Ensure we have enough data
-    if len(daily_sentiment) < 30:
-        print("Warning: Less than 30 days of data available for forecasting")
-        if len(daily_sentiment) < 7:  # Reduce minimum requirement from 14 to 7 days
-            raise ValueError("Not enough data for forecasting, need at least 7 days")
-    
-    # Prepare dataframe for Prophet (requires 'ds' and 'y' columns)
+    # Prepare dataframe for Prophet
     forecast_df = pd.DataFrame({
         'ds': daily_sentiment.index,
         'y': daily_sentiment['compound_score'],
         'message_volume': daily_sentiment['message_count']
     })
     
-    # Adapt model parameters for small datasets
-    use_yearly_seasonality = len(forecast_df) >= 365
-    use_weekly_seasonality = len(forecast_df) >= 14
-    use_daily_seasonality = len(forecast_df) >= 7
-
-    # Add additional regressor for message volume
+    # Set up Prophet model parameters for small dataset
     model = Prophet(
-        daily_seasonality=use_daily_seasonality,
-        weekly_seasonality=use_weekly_seasonality,
-        yearly_seasonality=use_yearly_seasonality,
-        seasonality_mode='additive',  # More stable for small datasets
-        uncertainty_samples=100       # Reduce computation time
+        daily_seasonality=True,
+        weekly_seasonality=False,  # Disable weekly seasonality for small dataset
+        yearly_seasonality=False,  # 2021 data only
+        seasonality_mode='additive',
+        uncertainty_samples=1000,  # Increase uncertainty samples
+        growth='linear',
+        changepoint_prior_scale=0.05,  # Reduce flexibility for small dataset
+        seasonality_prior_scale=10.0,  # Increase seasonality strength
     )
     model.add_regressor('message_volume')
     
@@ -135,28 +181,64 @@ def train_forecast_model():
     model.fit(forecast_df)
     print("Model training complete!")
     
-    # Calculate appropriate forecast period based on data amount
-    # Generally, don't forecast more than 50% of your historical data length
-    forecast_days = min(30, len(daily_sentiment) // 2)
-    if forecast_days < 3:
-        forecast_days = 3  # Minimum forecast period
-
-    print(f"Using forecast period of {forecast_days} days based on available data")
+    # Use a 3-day forecast period for small dataset
+    forecast_days = 3
+    print(f"Using {forecast_days}-day forecast period for small dataset")
 
     # Generate future dataframe for predictions
     future = model.make_future_dataframe(periods=forecast_days)
+    
     # Add message volume to future
-    # For simplicity, we'll use the average message volume from the last 7 days
-    avg_volume = daily_sentiment['message_count'].tail(7).mean()
+    avg_volume = daily_sentiment['message_count'].mean()  # Use overall mean for small dataset
     future['message_volume'] = avg_volume
     
     forecast = model.predict(future)
     
     # Plot forecast
-    fig = model.plot(forecast)
-    plt.title('Crypto Sentiment Forecast')
-    plt.ylabel('Sentiment Score (Positive - Negative)')
-    plt.savefig(os.path.join(MODELS_DIR, 'sentiment_forecast.png'))
+    fig = plt.figure(figsize=(12, 6))
+    
+    # Plot actual data points with markers
+    plt.plot(forecast_df['ds'], forecast_df['y'], 'bo-', label='Historical', linewidth=2, markersize=6)
+    
+    # Plot forecast
+    future_dates = forecast['ds'].tail(forecast_days)
+    future_values = forecast['yhat'].tail(forecast_days)
+    future_lower = forecast['yhat_lower'].tail(forecast_days)
+    future_upper = forecast['yhat_upper'].tail(forecast_days)
+    
+    plt.plot(future_dates, future_values, 'ro-', label='Forecast', linewidth=2, markersize=6)
+    plt.fill_between(future_dates, future_lower, future_upper, color='r', alpha=0.2, label='95% Confidence Interval')
+    
+    # Add reference line at the end of historical data
+    last_historical_date = forecast_df['ds'].max()
+    plt.axvline(x=last_historical_date, color='k', linestyle='--', label='Last Historical Date')
+    
+    plt.legend(loc='best', fontsize=10)
+    plt.title('Cryptocurrency Sentiment Forecast\nJanuary 2021 Data', fontsize=12, pad=20)
+    plt.xlabel('Date', fontsize=10)
+    plt.ylabel('Sentiment Score\n(Higher = More Positive)', fontsize=10)
+    plt.grid(True, alpha=0.3)
+    
+    # Format x-axis
+    plt.gca().xaxis.set_major_locator(plt.DayLocator(interval=1))
+    plt.gca().xaxis.set_major_formatter(plt.DateFormatter('%Y-%m-%d'))
+    
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=45, ha='right')
+    
+    # Add text box with data summary
+    text = f'Data Summary:\n' \
+           f'Period: {forecast_df["ds"].min().strftime("%Y-%m-%d")} to {forecast_df["ds"].max().strftime("%Y-%m-%d")}\n' \
+           f'Messages per day: {int(daily_sentiment["message_count"].mean())}'
+    plt.text(0.02, 0.98, text, transform=plt.gca().transAxes, 
+             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'),
+             verticalalignment='top', fontsize=8)
+    
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
+    
+    plt.savefig(os.path.join(MODELS_DIR, 'sentiment_forecast.png'), dpi=300, bbox_inches='tight')
+    plt.close()
     
     # Save components (trend, seasonality)
     fig2 = model.plot_components(forecast)
@@ -178,6 +260,9 @@ def train_forecast_model():
         "data_points": len(forecast_df),
         "forecast_days": forecast_days,
         "avg_message_volume": avg_volume,
+        "data_period": "2021",
+        "earliest_date": earliest_date.strftime("%Y-%m-%d"),
+        "latest_date": latest_date.strftime("%Y-%m-%d")
     }
     
     metadata_path = os.path.join(MODELS_DIR, 'forecast_model_metadata.json')
@@ -185,17 +270,16 @@ def train_forecast_model():
         json.dump(metadata, f, indent=2)
     
     # Evaluate on test data
-    # For simplicity, we'll use the last 14 days as test data (if we have enough data)
-    test_size = min(14, len(forecast_df) // 3)  # Use at most 1/3 of data for testing
+    test_size = min(7, len(forecast_df) // 3)  # Use at most 1/3 of data for testing
     
     if len(forecast_df) > test_size + 14:  # Need at least 14 days for training
         train = forecast_df[:-test_size]
         test = forecast_df[-test_size:]
         
         model_test = Prophet(
-            daily_seasonality=use_daily_seasonality,
-            weekly_seasonality=use_weekly_seasonality,
-            yearly_seasonality=use_yearly_seasonality,
+            daily_seasonality=True,
+            weekly_seasonality=True,
+            yearly_seasonality=False,
             seasonality_mode='additive',
             uncertainty_samples=100
         )
@@ -217,7 +301,7 @@ def train_forecast_model():
         plt.plot(test['ds'], test_actual, 'b-', label='Actual')
         plt.plot(test['ds'], test_predictions, 'r--', label='Predicted')
         plt.legend()
-        plt.title('Sentiment Forecast Model Validation')
+        plt.title('Sentiment Forecast Model Validation (2021 Data)')
         plt.xlabel('Date')
         plt.ylabel('Sentiment Score')
         plt.savefig(os.path.join(MODELS_DIR, 'forecast_validation.png'))

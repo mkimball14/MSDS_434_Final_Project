@@ -11,10 +11,16 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from typing import List, Dict, Optional
 from fastapi.responses import HTMLResponse
 import matplotlib.pyplot as plt
+from matplotlib.dates import DayLocator, DateFormatter
 from datetime import datetime
 import io
 import base64
 import json
+import logging
+
+# Set up logging at the top of the file
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Define paths
 MODELS_DIR = os.getenv("MODELS_DIR", "models")
@@ -42,31 +48,26 @@ try:
     from prophet import Prophet
     
     if os.path.exists(forecast_model_path):
+        logger.info(f"Loading forecast model from {forecast_model_path}")
         forecast_model = joblib.load(forecast_model_path)
         
         if os.path.exists(avg_message_volume_path):
+            logger.info(f"Loading average message volume from {avg_message_volume_path}")
             with open(avg_message_volume_path, 'r') as f:
                 avg_message_volume = float(f.read().strip())
+            logger.info(f"Average message volume: {avg_message_volume}")
         else:
-            # Fallback to default if file doesn't exist
+            logger.warning("Average message volume file not found, using default")
             avg_message_volume = 100.0
             
         forecast_available = True
-        print(f"Forecast model loaded successfully from {forecast_model_path}")
+        logger.info("Forecast model loaded successfully")
     else:
-        # Try loading from current directory (for backward compatibility)
-        try:
-            forecast_model = joblib.load("sentiment_forecast_model.pkl")
-            with open('avg_message_volume.txt', 'r') as f:
-                avg_message_volume = float(f.read().strip())
-            forecast_available = True
-            print("Forecast model loaded successfully from current directory")
-        except:
-            forecast_available = False
-            print("Forecast model not found")
+        logger.warning(f"Forecast model not found at {forecast_model_path}")
+        forecast_available = False
 except Exception as e:
     forecast_available = False
-    print(f"Forecast model not available: {str(e)}")
+    logger.error(f"Error loading forecast model: {str(e)}")
 
 # Load forecast model metadata if available
 forecast_metadata = {}
@@ -168,99 +169,139 @@ if forecast_available:
 
     @app.get("/forecast_chart/{days}", response_class=HTMLResponse)
     async def get_forecast_chart(days: int = 30):
-        if days < 1 or days > 90:
-            raise HTTPException(status_code=400, detail="Days ahead must be between 1 and 90")
-        
-        # Generate future dataframe for predictions
-        future = forecast_model.make_future_dataframe(periods=days)
-        future['message_volume'] = avg_message_volume
-        forecast = forecast_model.predict(future)
-        
-        # Create a chart using matplotlib
-        plt.figure(figsize=(12, 6))
-        
-        # Plot actual data points
-        forecast_df = pd.DataFrame({
-            'ds': future['ds'],
-            'yhat': forecast['yhat'],
-            'yhat_lower': forecast['yhat_lower'],
-            'yhat_upper': forecast['yhat_upper'],
-        })
-        
-        # Get today's date
-        today = pd.Timestamp.now().normalize()
-        
-        # Split into historical and future
-        historical = forecast_df[forecast_df['ds'] < today]
-        future_data = forecast_df[forecast_df['ds'] >= today]
-        
-        # Plot
-        plt.plot(historical['ds'], historical['yhat'], 'b-', label='Historical')
-        plt.plot(future_data['ds'], future_data['yhat'], 'r-', label='Forecast')
-        plt.fill_between(future_data['ds'], future_data['yhat_lower'], future_data['yhat_upper'], 
-                        color='r', alpha=0.2, label='95% Confidence Interval')
-        
-        plt.axvline(x=today, color='k', linestyle='--', label='Today')
-        plt.legend()
-        plt.title(f'Cryptocurrency Sentiment Forecast - Next {days} Days')
-        plt.xlabel('Date')
-        plt.ylabel('Sentiment Score (Higher = More Positive)')
-        plt.grid(True, alpha=0.3)
-        
-        # Convert plot to base64 image to embed in HTML
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        img_str = base64.b64encode(buf.read()).decode('utf-8')
-        
-        # Create HTML response
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Crypto Sentiment Forecast</title>
-            <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    margin: 40px;
-                    line-height: 1.6;
-                }}
-                .container {{
-                    max-width: 1000px;
-                    margin: 0 auto;
-                }}
-                .chart {{
-                    width: 100%;
-                    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-                    margin: 20px 0;
-                }}
-                h1 {{
-                    color: #333;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>Cryptocurrency Sentiment Forecast</h1>
-                <p>Showing forecast for the next {days} days</p>
-                <img src="data:image/png;base64,{img_str}" class="chart">
-                <div>
-                    <p><strong>Interpretation:</strong></p>
-                    <ul>
-                        <li>Higher values indicate more positive sentiment</li>
-                        <li>Lower values indicate more negative sentiment</li>
-                        <li>The shaded area represents the 95% confidence interval</li>
-                    </ul>
-                    <p>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        logger.info(f"Generating forecast chart for {days} days")
+        try:
+            if days < 1 or days > 90:
+                raise HTTPException(status_code=400, detail="Days ahead must be between 1 and 90")
+            
+            # Load metadata to get actual data period
+            metadata_path = os.path.join(MODELS_DIR, "forecast_model_metadata.json")
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+            
+            # Get the actual data range
+            earliest_date = pd.to_datetime(metadata["earliest_date"])
+            latest_date = pd.to_datetime(metadata["latest_date"])
+            forecast_days = metadata["forecast_days"]
+            
+            # Generate future dataframe for predictions
+            logger.info("Creating future dataframe")
+            future = forecast_model.make_future_dataframe(periods=forecast_days)
+            future['message_volume'] = avg_message_volume
+            logger.info("Making forecast predictions")
+            forecast = forecast_model.predict(future)
+            logger.info("Forecast predictions completed")
+            
+            # Create a chart using matplotlib
+            logger.info("Creating visualization")
+            plt.figure(figsize=(12, 6))
+            
+            # Plot actual data points
+            forecast_df = pd.DataFrame({
+                'ds': future['ds'],
+                'yhat': forecast['yhat'],
+                'yhat_lower': forecast['yhat_lower'],
+                'yhat_upper': forecast['yhat_upper'],
+            })
+            
+            # Split into historical and future based on actual data range
+            historical = forecast_df[forecast_df['ds'] <= latest_date]
+            future_data = forecast_df[forecast_df['ds'] > latest_date]
+            
+            # Plot with actual data range
+            plt.plot(historical['ds'], historical['yhat'], 'b-', label='Historical', linewidth=2, markersize=6)
+            plt.plot(future_data['ds'], future_data['yhat'], 'r-', label='Forecast', linewidth=2, markersize=6)
+            plt.fill_between(future_data['ds'], future_data['yhat_lower'], future_data['yhat_upper'], 
+                            color='r', alpha=0.2, label='95% Confidence Interval')
+            
+            plt.axvline(x=latest_date, color='k', linestyle='--', label='Last Historical Date')
+            plt.legend()
+            plt.title('Cryptocurrency Sentiment Forecast\nJanuary 2021 Data', fontsize=12, pad=20)
+            plt.xlabel('Date')
+            plt.ylabel('Sentiment Score (Higher = More Positive)')
+            plt.grid(True, alpha=0.3)
+            
+            # Format x-axis to show daily ticks
+            plt.gca().xaxis.set_major_locator(DayLocator(interval=1))
+            plt.gca().xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+            
+            # Set x-axis limits to focus on the actual data period
+            plt.xlim(earliest_date - pd.Timedelta(days=1), 
+                    latest_date + pd.Timedelta(days=forecast_days + 1))
+            
+            # Rotate x-axis labels for better readability
+            plt.xticks(rotation=45, ha='right')
+            
+            # Add text box with data summary
+            text = f'Data Summary:\n' \
+                   f'Period: {earliest_date.strftime("%Y-%m-%d")} to {latest_date.strftime("%Y-%m-%d")}\n' \
+                   f'Messages per day: {int(avg_message_volume)}'
+            plt.text(0.02, 0.98, text, transform=plt.gca().transAxes, 
+                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'),
+                     verticalalignment='top', fontsize=8)
+            
+            # Adjust layout to prevent label cutoff
+            plt.tight_layout()
+            
+            # Convert plot to base64 image to embed in HTML
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+            buf.seek(0)
+            img_str = base64.b64encode(buf.read()).decode('utf-8')
+            plt.close()
+            
+            # Create HTML response
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Crypto Sentiment Forecast</title>
+                <style>
+                    body {{
+                        font-family: Arial, sans-serif;
+                        margin: 40px;
+                        line-height: 1.6;
+                    }}
+                    .container {{
+                        max-width: 1000px;
+                        margin: 0 auto;
+                    }}
+                    .chart {{
+                        width: 100%;
+                        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                        margin: 20px 0;
+                    }}
+                    h1 {{
+                        color: #333;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Cryptocurrency Sentiment Forecast</h1>
+                    <p>Showing forecast for the next {forecast_days} days</p>
+                    <img src="data:image/png;base64,{img_str}" class="chart">
+                    <div>
+                        <p><strong>Interpretation:</strong></p>
+                        <ul>
+                            <li>Higher values indicate more positive sentiment</li>
+                            <li>Lower values indicate more negative sentiment</li>
+                            <li>The shaded area represents the 95% confidence interval</li>
+                        </ul>
+                        <p>Last updated: {metadata["training_date"]}</p>
+                    </div>
                 </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return html_content
+            </body>
+            </html>
+            """
+            
+            return html_content
+        except Exception as e:
+            logger.error(f"Error generating forecast chart: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 else:
     @app.get("/forecast_status")
     def forecast_status():
         return {"status": "Forecast model not available", "available": False}
+
 
