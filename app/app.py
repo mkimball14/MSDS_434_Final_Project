@@ -33,15 +33,8 @@ vectorizer_path = os.path.join(MODELS_DIR, "vectorizer.pkl")
 forecast_model_path = os.path.join(MODELS_DIR, "sentiment_forecast_model.pkl")
 avg_message_volume_path = os.path.join(MODELS_DIR, "avg_message_volume.txt")
 
-# Check if models exist in the models directory, if not look for them in the current directory
-if not os.path.exists(onnx_model_path) and os.path.exists("sentiment_model.onnx"):
-    onnx_model_path = "sentiment_model.onnx"
-    
-if not os.path.exists(vectorizer_path) and os.path.exists("vectorizer.pkl"):
-    vectorizer_path = "vectorizer.pkl"
-
 # Load ONNX model & vectorizer
-onnx_session = ort.InferenceSession(onnx_model_path)
+onnx_session = ort.InferenceSession(onnx_model_path, providers=['CPUExecutionProvider'])
 vectorizer = joblib.load(vectorizer_path)
 
 # Try to load the forecast model if it exists

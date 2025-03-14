@@ -1,6 +1,7 @@
 import json
 import boto3
 import pandas as pd
+import os
 from io import StringIO
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -10,6 +11,12 @@ import joblib
 import onnx
 import skl2onnx
 from skl2onnx.common.data_types import FloatTensorType
+
+# Define models directory
+MODELS_DIR = os.getenv("MODELS_DIR", "models")
+os.makedirs(MODELS_DIR, exist_ok=True)
+
+print(f"Models will be saved to {MODELS_DIR}")
 
 # Load data from S3
 s3_bucket = "crypto-sentiment-bucket2"
@@ -43,14 +50,20 @@ accuracy = accuracy_score(y_val, y_pred)
 print(f"Model Accuracy: {accuracy:.4f}")
 
 # Save Model & Vectorizer
-joblib.dump(model, "sentiment_model.pkl")
-joblib.dump(vectorizer, "vectorizer.pkl")
+model_path = os.path.join(MODELS_DIR, "sentiment_model.pkl")
+vectorizer_path = os.path.join(MODELS_DIR, "vectorizer.pkl")
+onnx_path = os.path.join(MODELS_DIR, "sentiment_model.onnx")
+
+joblib.dump(model, model_path)
+joblib.dump(vectorizer, vectorizer_path)
 
 # Convert Model to ONNX Format
 initial_type = [("input", FloatTensorType([None, X.shape[1]]))]
 onnx_model = skl2onnx.convert_sklearn(model, initial_types=initial_type)
-with open("sentiment_model.onnx", "wb") as f:
+with open(onnx_path, "wb") as f:
     f.write(onnx_model.SerializeToString())
 
-print("Model trained & saved as ONNX: sentiment_model.onnx")
+print(f"Model trained & saved as ONNX: {onnx_path}")
+print(f"Vectorizer saved to: {vectorizer_path}")
+print(f"Model saved to: {model_path}")
 
