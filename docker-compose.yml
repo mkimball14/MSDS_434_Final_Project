@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  sentiment-api:
+    image: ${DOCKER_USERNAME}/crypto-sentiment:${TAG:-main}
+    # If you prefer to build locally instead of pulling:
+    # build: ./app
+    container_name: sentiment-api
+    ports:
+      - "8080:8080"
+    environment:
+      - S3_BUCKET_NAME=crypto-sentiment-bucket2
+      - MODELS_DIR=/app/models
+    volumes:
+      - ./app/models:/app/models
+    networks:
+      - monitoring-network
+    restart: unless-stopped
+    
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring-network
+    restart: unless-stopped
+    
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - monitoring-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+networks:
+  monitoring-network:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
