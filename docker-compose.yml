@@ -1,10 +1,9 @@
-version: '3.8'
 
 services:
   sentiment-api:
-    image: ${DOCKER_USERNAME}/crypto-sentiment:${TAG:-main}
+   # image: ${DOCKER_USERNAME}/crypto-sentiment:${TAG:-main}
     # If you prefer to build locally instead of pulling:
-    # build: ./app
+    build: ./app
     container_name: sentiment-api
     ports:
       - "8080:8080"

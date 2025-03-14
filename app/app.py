@@ -41,7 +41,7 @@ if not os.path.exists(vectorizer_path) and os.path.exists("vectorizer.pkl"):
     vectorizer_path = "vectorizer.pkl"
 
 # Load ONNX model & vectorizer
-onnx_session = ort.InferenceSession(onnx_model_path)
+onnx_session = ort.InferenceSession(onnx_model_path, providers=['CPUExecutionProvider'])
 vectorizer = joblib.load(vectorizer_path)
 
 # Try to load the forecast model if it exists
