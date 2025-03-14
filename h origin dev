@@ -1,7 +1,0 @@
-[33mcommit 84f66d3e58a43e36666142eb0b5fc002fe0049cb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mdev[m[33m)[m
-Author: Maximilian James Kimball <hqu0340@ads.northwestern.edu>
-Date:   Thu Mar 13 22:25:22 2025 -0500
-
-    Removed large [1;31mbinance[m dataset
-
-D	group_messages_binance.json

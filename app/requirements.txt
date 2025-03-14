@@ -5,7 +5,7 @@ pandas==2.0.0
 scikit-learn==1.2.2
 joblib==1.2.0
 boto3==1.26.115
-onnxruntime==1.14.1
+onnxruntime==1.16.0
 prometheus-fastapi-instrumentator==5.9.1
 prometheus-client==0.16.0
 prophet==1.1.4
