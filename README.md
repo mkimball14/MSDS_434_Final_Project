@@ -15,7 +15,8 @@ I learned a lot about cloud and CI/CD deployment in this project. Here's what I 
 
 ## How to Run It
 http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/predict\
-http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/forecast_chart/7\
+
+http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/forecast_chart/7
 
 If you want to try this out locally:
 
@@ -32,7 +33,7 @@ app/
 -- app.py              # Main API code\
 -- train_forecast_model.py    # Creates the forecast model\
 -- train_sentiment_model.py   # Creates the sentiment model\
--- requirements.txt    # Python packages I used\
+-- requirements.txt    # Python packages I used
 
 ## What the API Does
 
