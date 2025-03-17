@@ -14,7 +14,7 @@ I learned a lot about cloud and CI/CD deployment in this project. Here's what I 
 - It's all running on AWS EC2
 
 ## How to Run It
-http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/predict\
+http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/predict  
 
 http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/forecast_chart/7
 
