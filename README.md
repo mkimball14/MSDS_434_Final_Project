@@ -1,6 +1,7 @@
 # Crypto Sentiment Analysis Project
 
 This is my final project for MSDS 434 at Northwestern. I built a web service that checks if people are saying positive or negative things about crypto on social media. It also tries to predict if the sentiment will be more positive or negative in the future.
+![image](https://github.com/user-attachments/assets/9224d06a-fa03-4a8c-ba4b-d3c91aae1468)
 
 ## What I Built
 
@@ -13,6 +14,8 @@ I learned a lot about cloud and CI/CD deployment in this project. Here's what I 
 - It's all running on AWS EC2
 
 ## How to Run It
+http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/predict
+http://ec2-35-86-159-254.us-west-2.compute.amazonaws.com:8080/forecast_chart/7
 
 If you want to try this out locally:
 
@@ -25,11 +28,11 @@ If you want to try this out locally:
 Here's how I organized my files:
 
 app/
-├── models/              # Where the ML models live
-├── app.py              # Main API code
-├── train_forecast_model.py    # Creates the forecast model
-├── train_sentiment_model.py   # Creates the sentiment model
-└── requirements.txt    # Python packages I used
+ --models/              # Where the ML models live
+-- app.py              # Main API code
+-- train_forecast_model.py    # Creates the forecast model
+-- train_sentiment_model.py   # Creates the sentiment model
+-- requirements.txt    # Python packages I used
 
 ## What the API Does
 
